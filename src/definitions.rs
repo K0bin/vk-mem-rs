@@ -367,7 +367,7 @@ impl<'a> AllocatorCreateInfo<'a> {
         self
     }
 
-    pub fn flags(mut self, flags: AllocationCreateFlags) -> Self {
+    pub fn flags(mut self, flags: AllocatorCreateFlags) -> Self {
         self.inner.flags = flags.bits;
         self
     }
