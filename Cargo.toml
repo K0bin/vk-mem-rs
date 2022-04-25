@@ -45,7 +45,7 @@ opt-level = 3
 codegen-units = 1
 
 [features]
-default = []
+default = ["generate_bindings"]
 generate_bindings=["bindgen"]
 link_vulkan=[]
 recording=[]

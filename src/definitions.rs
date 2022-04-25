@@ -27,6 +27,9 @@ pub enum MemoryUsage {
     /// Allocation may still end up in `ash::vk::MemoryPropertyFlags::HOST_VISIBLE` memory on some implementations.
     /// In such case, you are free to map it.
     /// You can use `AllocationCreateFlags::MAPPED` with this usage type.
+    ///
+    /// Obsolete, preserved for backward compatibility. Prefers VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.
+    #[deprecated]
     GpuOnly,
 
     /// Memory will be mappable on host.
@@ -37,6 +40,9 @@ pub enum MemoryUsage {
     /// It is roughly equivalent of `D3D12_HEAP_TYPE_UPLOAD`.
     ///
     /// Usage: Staging copy of resources used as transfer source.
+    ///
+    /// Obsolete, preserved for backward compatibility. Guarantees VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT and VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.
+    #[deprecated]
     CpuOnly,
 
     /// Memory that is both mappable on host (guarantees to be `ash::vk::MemoryPropertyFlags::HOST_VISIBLE`) and preferably fast to access by GPU.
@@ -44,6 +50,9 @@ pub enum MemoryUsage {
     ///
     /// Usage: Resources written frequently by host (dynamic), read by device. E.g. textures, vertex buffers,
     /// uniform buffers updated every frame or every draw call.
+    ///
+    /// Obsolete, preserved for backward compatibility. Guarantees VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, prefers VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.
+    #[deprecated]
     CpuToGpu,
 
     /// Memory mappable on host (guarantees to be `ash::vk::MemoryPropertFlags::HOST_VISIBLE`) and cached.
@@ -53,6 +62,9 @@ pub enum MemoryUsage {
     ///
     /// - Resources written by device, read by host - results of some computations, e.g. screen capture, average scene luminance for HDR tone mapping.
     /// - Any resources read or accessed randomly on host, e.g. CPU-side copy of vertex buffer used as source of transfer, but also used for collision detection.
+    ///
+    /// Obsolete, preserved for backward compatibility. Guarantees VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, prefers VK_MEMORY_PROPERTY_HOST_CACHED_BIT.
+    #[deprecated]
     GpuToCpu,
 
     /// Lazily allocated GPU memory having (guarantees to be `ash::vk::MemoryPropertFlags::LAZILY_ALLOCATED`).
@@ -62,6 +74,27 @@ pub enum MemoryUsage {
     ///
     /// -  Memory for transient attachment images (color attachments, depth attachments etc.), created with `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT`.
     GpuLazy,
+
+    /// Selects best memory type automatically. This flag is recommended for most common use cases.
+    ///
+    /// When using this flag, if you want to map the allocation (using vmaMapMemory() or VMA_ALLOCATION_CREATE_MAPPED_BIT), you must pass one of the flags: VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT or VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT in VmaAllocationCreateInfo::flags.
+    ///
+    /// It can be used only with functions that let the library know VkBufferCreateInfo or VkImageCreateInfo, e.g. vmaCreateBuffer(), vmaCreateImage(), vmaFindMemoryTypeIndexForBufferInfo(), vmaFindMemoryTypeIndexForImageInfo() and not with generic memory allocation functions.
+    Auto,
+
+    /// Selects best memory type automatically with preference for GPU (device) memory.
+    ///
+    /// When using this flag, if you want to map the allocation (using vmaMapMemory() or VMA_ALLOCATION_CREATE_MAPPED_BIT), you must pass one of the flags: VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT or VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT in VmaAllocationCreateInfo::flags.
+    ///
+    /// It can be used only with functions that let the library know VkBufferCreateInfo or VkImageCreateInfo, e.g. vmaCreateBuffer(), vmaCreateImage(), vmaFindMemoryTypeIndexForBufferInfo(), vmaFindMemoryTypeIndexForImageInfo() and not with generic memory allocation functions.
+    AutoPreferDevice,
+
+    /// Selects best memory type automatically with preference for CPU (host) memory.
+    ///
+    /// When using this flag, if you want to map the allocation (using vmaMapMemory() or VMA_ALLOCATION_CREATE_MAPPED_BIT), you must pass one of the flags: VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT or VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT in VmaAllocationCreateInfo::flags.
+    ///
+    /// It can be used only with functions that let the library know VkBufferCreateInfo or VkImageCreateInfo, e.g. vmaCreateBuffer(), vmaCreateImage(), vmaFindMemoryTypeIndexForBufferInfo(), vmaFindMemoryTypeIndexForImageInfo() and not with generic memory allocation functions.
+    AutoPreferHost
 }
 
 bitflags! {
@@ -303,25 +336,6 @@ bitflags! {
         /// When using this flag, you must specify PoolCreateInfo::max_block_count == 1 (or 0 for default).
         const LINEAR_ALGORITHM = ffi::VmaPoolCreateFlagBits_VMA_POOL_CREATE_LINEAR_ALGORITHM_BIT;
 
-        /// Enables alternative, buddy allocation algorithm in this pool.
-        ///
-        /// It operates on a tree of blocks, each having size that is a power of two and
-        /// a half of its parent's size. Comparing to default algorithm, this one provides
-        /// faster allocation and deallocation and decreased external fragmentation,
-        /// at the expense of more memory wasted (internal fragmentation).
-        const BUDDY_ALGORITHM = ffi::VmaPoolCreateFlagBits_VMA_POOL_CREATE_BUDDY_ALGORITHM_BIT;
-
-        /// \brief Enables alternative, Two-Level Segregated Fit (TLSF) allocation algorithm in this pool.
-        ///
-        /// This algorithm is based on 2-level lists dividing address space into smaller
-        /// chunks. The first level is aligned to power of two which serves as buckets for requested
-        /// memory to fall into, and the second level is lineary subdivided into lists of free memory.
-        /// This algorithm aims to achieve bounded response time even in the worst case scenario.
-        /// Allocation time can be sometimes slightly longer than compared to other algorithms
-        /// but in return the application can avoid stalls in case of fragmentation, giving
-        /// predictable results, suitable for real-time use cases.
-        const TLSF_ALGORITHM_BIT = ffi::VmaPoolCreateFlagBits_VMA_POOL_CREATE_TLSF_ALGORITHM_BIT;
-
         /// Bit mask to extract only `*_ALGORITHM` bits from entire set of flags.
         const ALGORITHM_MASK = ffi::VmaPoolCreateFlagBits_VMA_POOL_CREATE_ALGORITHM_MASK;
     }
@@ -510,6 +524,9 @@ impl<'a> AllocationCreateInfo<'a> {
             MemoryUsage::CpuToGpu => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_CPU_TO_GPU,
             MemoryUsage::GpuToCpu => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_GPU_TO_CPU,
             MemoryUsage::GpuLazy => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_GPU_LAZILY_ALLOCATED,
+            MemoryUsage::Auto => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_AUTO,
+            MemoryUsage::AutoPreferDevice => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            MemoryUsage::AutoPreferHost => ffi::VmaMemoryUsage_VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
         };
         self
     }

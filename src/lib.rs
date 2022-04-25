@@ -144,38 +144,11 @@ pub struct DefragmentationContext {
     pub(crate) changed: Vec<ash::vk::Bool32>,
 }
 
-/// Optional configuration parameters to be passed to `Allocator::defragment`
-///
-/// DEPRECATED.
-#[derive(Debug, Copy, Clone)]
-pub struct DefragmentationInfo {
-    /// Maximum total numbers of bytes that can be copied while moving
-    /// allocations to different places.
-    ///
-    /// Default is `ash::vk::WHOLE_SIZE`, which means no limit.
-    pub max_bytes_to_move: usize,
-
-    /// Maximum number of allocations that can be moved to different place.
-    ///
-    /// Default is `std::u32::MAX`, which means no limit.
-    pub max_allocations_to_move: u32,
-}
-
-/// Construct `DefragmentationInfo` with default values
-impl Default for DefragmentationInfo {
-    fn default() -> Self {
-        DefragmentationInfo {
-            max_bytes_to_move: ash::vk::WHOLE_SIZE as usize,
-            max_allocations_to_move: std::u32::MAX,
-        }
-    }
-}
-
 /// Parameters for defragmentation.
 ///
 /// To be used with function `Allocator::defragmentation_begin`.
 #[derive(Debug, Clone)]
-pub struct DefragmentationInfo2<'a> {
+pub struct DefragmentationInfo<'a> {
     /// Collection of allocations that can be defragmented.
     ///
     /// Elements in the slice should be unique - same allocation cannot occur twice.
@@ -821,7 +794,7 @@ impl Allocator {
     /// and make sure it finished execution before calling `Allocator::defragmentation_end`.
     pub unsafe fn defragmentation_begin(
         &self,
-        info: &DefragmentationInfo2,
+        info: &DefragmentationInfo,
     ) -> VkResult<DefragmentationContext> {
         let command_buffer = match info.command_buffer {
             Some(command_buffer) => command_buffer,
@@ -841,7 +814,7 @@ impl Allocator {
 
         let pools = info.pools.unwrap_or(&[]);
 
-        let ffi_info = ffi::VmaDefragmentationInfo2 {
+        let ffi_info = ffi::VmaDefragmentationInfo {
             flags: 0, // Reserved for future use
             allocationCount: info.allocations.len() as u32,
             pAllocations: info.allocations.as_ptr() as *mut _,
@@ -872,7 +845,7 @@ impl Allocator {
         &self,
         context: &mut DefragmentationContext,
     ) -> VkResult<(DefragmentationStats, Vec<bool>)> {
-        ffi_to_result(ffi::vmaDefragmentationEnd(self.internal, context.internal))?;
+        ffi_to_result(ffi::vmaEndDefragmentation(self.internal, context.internal))?;
 
         let changed: Vec<bool> = context.changed.iter().map(|change| *change == 1).collect();
 
@@ -884,92 +857,6 @@ impl Allocator {
         };
 
         Ok((stats, changed))
-    }
-
-    /// Compacts memory by moving allocations.
-    ///
-    /// `allocations` is a slice of allocations that can be moved during this compaction.
-    /// `defrag_info` optional configuration parameters.
-    /// Returns statistics from the defragmentation, and an associated array to `allocations`
-    /// which indicates which allocations were changed (if any).
-    ///
-    /// Possible error values:
-    ///
-    /// - `ash::vk::Result::INCOMPLETE` if succeeded but didn't make all possible optimizations because limits specified in
-    ///   `defrag_info` have been reached, negative error code in case of error.
-    ///
-    /// This function works by moving allocations to different places (different
-    /// `ash::vk::DeviceMemory` objects and/or different offsets) in order to optimize memory
-    /// usage. Only allocations that are in `allocations` slice can be moved. All other
-    /// allocations are considered nonmovable in this call. Basic rules:
-    ///
-    /// - Only allocations made in memory types that have
-    ///   `ash::vk::MemoryPropertyFlags::HOST_VISIBLE` and `ash::vk::MemoryPropertyFlags::HOST_COHERENT`
-    ///   flags can be compacted. You may pass other allocations but it makes no sense -
-    ///   these will never be moved.
-    ///
-    /// - Custom pools created with `AllocatorPoolCreateFlags::LINEAR_ALGORITHM` or `AllocatorPoolCreateFlags::BUDDY_ALGORITHM` flag are not
-    ///   defragmented. Allocations passed to this function that come from such pools are ignored.
-    ///
-    /// - Allocations created with `AllocationCreateFlags::DEDICATED_MEMORY` or created as dedicated allocations for any
-    ///   other reason are also ignored.
-    ///
-    /// - Both allocations made with or without `AllocationCreateFlags::MAPPED` flag can be compacted. If not persistently
-    ///   mapped, memory will be mapped temporarily inside this function if needed.
-    ///
-    /// - You must not pass same `allocation` object multiple times in `allocations` slice.
-    ///
-    /// The function also frees empty `ash::vk::DeviceMemory` blocks.
-    ///
-    /// Warning: This function may be time-consuming, so you shouldn't call it too often
-    /// (like after every resource creation/destruction).
-    /// You can call it on special occasions (like when reloading a game level or
-    /// when you just destroyed a lot of objects). Calling it every frame may be OK, but
-    /// you should measure that on your platform.
-    #[deprecated(
-        since = "0.1.3",
-        note = "This is a part of the old interface. It is recommended to use structure `DefragmentationInfo2` and function `Allocator::defragmentation_begin` instead."
-    )]
-    pub unsafe fn defragment(
-        &self,
-        allocations: &[Allocation],
-        defrag_info: Option<&DefragmentationInfo>,
-    ) -> VkResult<(DefragmentationStats, Vec<bool>)> {
-        let mut ffi_change_list: Vec<vk::Bool32> = vec![0; allocations.len()];
-        let ffi_info = match defrag_info {
-            Some(info) => ffi::VmaDefragmentationInfo {
-                maxBytesToMove: info.max_bytes_to_move as vk::DeviceSize,
-                maxAllocationsToMove: info.max_allocations_to_move,
-            },
-            None => ffi::VmaDefragmentationInfo {
-                maxBytesToMove: ash::vk::WHOLE_SIZE,
-                maxAllocationsToMove: std::u32::MAX,
-            },
-        };
-
-        let mut ffi_stats: ffi::VmaDefragmentationStats = mem::zeroed();
-        ffi_to_result(ffi::vmaDefragment(
-            self.internal,
-            allocations.as_ptr() as *mut _,
-            allocations.len(),
-            ffi_change_list.as_mut_ptr(),
-            &ffi_info,
-            &mut ffi_stats,
-        ))?;
-
-        let change_list: Vec<bool> = ffi_change_list
-            .iter()
-            .map(|change| *change == ash::vk::TRUE)
-            .collect();
-
-        let stats = DefragmentationStats {
-            bytes_moved: ffi_stats.bytesMoved as usize,
-            bytes_freed: ffi_stats.bytesFreed as usize,
-            allocations_moved: ffi_stats.allocationsMoved,
-            device_memory_blocks_freed: ffi_stats.deviceMemoryBlocksFreed,
-        };
-
-        Ok((stats, change_list))
     }
 
     /// Binds buffer to allocation.
